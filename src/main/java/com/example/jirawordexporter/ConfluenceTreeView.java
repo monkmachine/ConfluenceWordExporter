@@ -1,6 +1,5 @@
 package com.example.jirawordexporter;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -9,12 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-
+import com.google.gson.*;
 import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.scene.control.TreeItem;
@@ -24,18 +18,16 @@ import javafx.stage.Stage;
 
 public class ConfluenceTreeView extends Application {
     private static final String spaceKey = "TIKA";
-    private static final int limit = 500;
-
+    private Map<String, TreeItem<String>> parentMap = new TreeMap<>();
+    private TreeItem<String> root = new TreeItem<>("Pages");
 
     @Override
-    public void start(Stage stage) {
+    public void start(Stage stage) throws IOException {
         TreeView<String> treeView = new TreeView<>();
         treeView.setRoot(getPages(spaceKey));
         treeView.setShowRoot(false);
-
         StackPane root = new StackPane();
         root.getChildren().add(treeView);
-
         Scene scene = new Scene(root, 800, 600);
 
         stage.setScene(scene);
@@ -43,71 +35,73 @@ public class ConfluenceTreeView extends Application {
         stage.show();
     }
 
-    private TreeItem<String> getPages(String spaceKey) {
+    private TreeItem<String> getPages(String spaceKey) throws IOException {
         int start = 0;
         List<JsonObject> pages = new ArrayList<>();
 
-        while (true) {
-            try {
-                URL url = new URL("https://cwiki.apache.org/confluence/rest/api/content?spaceKey=" + spaceKey + "&start=" + start + "&limit=" + limit);
-                HttpURLConnection con = (HttpURLConnection) url.openConnection();
-                con.setRequestMethod("GET");
+        URL url = new URL("https://cwiki.apache.org/confluence/pages/children.action?spaceKey="+spaceKey+"&node=root");
+        HttpURLConnection con = (HttpURLConnection) url.openConnection();
+        con.setRequestMethod("GET");
 
-                BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
-                String inputLine;
-                StringBuilder content = new StringBuilder();
-                while ((inputLine = in.readLine()) != null) {
-                    content.append(inputLine);
-                }
-                in.close();
-                con.disconnect();
-
-                JsonObject response = new JsonParser().parse(content.toString()).getAsJsonObject();
-                JsonArray pageArray = response.getAsJsonArray("results");
-
-                if (pageArray.size() == 0) {
-                    break;
-                }
-
-                for (int i = 0; i < pageArray.size(); i++) {
-                    JsonObject page = pageArray.get(i).getAsJsonObject();
-                    pages.add(page);
-                }
-
-                start += limit;
-            } catch (IOException e) {
-                System.err.println("An error occurred while retrieving pages: " + e.getMessage());
-                break;
-            }
+        InputStreamReader reader = new InputStreamReader(con.getInputStream());
+        JsonArray pageArray = new Gson().fromJson(reader, JsonArray.class);
+        for (int i = 0; i < pageArray.size(); i++) {
+            JsonObject page = pageArray.get(i).getAsJsonObject();
+            pages.add(page);
         }
+        reader.close();
+        con.disconnect();
 
-        Map<String, TreeItem<String>> parentMap = new TreeMap<>();
-        TreeItem<String> root = new TreeItem<>("Pages");
         parentMap.put("", root);
 
         for (JsonObject page : pages) {
-            JsonElement parentElement = page.get("_links").getAsJsonObject().get("parent");
-            String parentId = "";
-            if (parentElement != null && parentElement.isJsonObject()) {
-                parentId = parentElement.getAsJsonObject().get("id").getAsString();
-            }
-            String title = page.get("title").getAsString();
-
-            TreeItem<String> parent = parentMap.get(parentId);
-            if (parent == null) {
-                parent = root;
-            }
-
-            TreeItem<String> child = new TreeItem<>(title);
-            parent.getChildren().add(child);
-            parentMap.put(page.get("id").getAsString(), child);
+            processPages(page,"");
+            processChildren(page.get("pageId").getAsString(), page.get("text").getAsString());
         }
 
         return root;
     }
 
+    private void processPages(JsonObject page, String parentId) {
+        String pageId = page.get("pageId").getAsString();
+        String title = page.get("text").getAsString();
+        TreeItem<String> parent = parentMap.get(parentId);
+        if (parent == null) {
+            parent = root;
+        }
+        TreeItem<String> child = new TreeItem<>(title);
+        parent.getChildren().add(child);
+        parentMap.put(page.get("text").getAsString(), child);
+    }
+
+
     public static void main(String[] args) {
         launch(args);
+    }
+    private void processChildren(String parentId, String parentName) throws IOException {
+        List<JsonObject> pages;
+        pages = getChildIds(parentId);
+        for (JsonObject page : pages) {
+            processPages(page,parentName);
+            processChildren(page.get("pageId").getAsString(), page.get("text").getAsString());
+        }
+    }
+
+    private List<JsonObject> getChildIds(String parentId) throws IOException {
+        List<JsonObject> pages = new ArrayList<>();
+        URL url = new URL("https://cwiki.apache.org/confluence/pages/children.action?pageId="+parentId);
+        HttpURLConnection con = (HttpURLConnection) url.openConnection();
+        con.setRequestMethod("GET");
+        InputStreamReader reader = new InputStreamReader(con.getInputStream());
+        JsonArray pageArray = new Gson().fromJson(reader, JsonArray.class);
+        for (int i = 0; i < pageArray.size(); i++) {
+            JsonObject page = pageArray.get(i).getAsJsonObject();
+            pages.add(page);
+        }
+        reader.close();
+        con.disconnect();
+
+        return pages;
     }
 }
 
