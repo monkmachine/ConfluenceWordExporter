@@ -26,6 +26,7 @@ public class ConfluenceTreeView extends Application {
     private static final String spaceKey = "TIKA";
     private static final int limit = 500;
 
+
     @Override
     public void start(Stage stage) {
         TreeView<String> treeView = new TreeView<>();
